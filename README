@@ -1,0 +1,49 @@
+Python Aminet Download Tool
+---------------------------
+
+This is a tool which downloads files from Aminet, and then transfers them over the tty using sz.
+
+I prefer to use sz (ZMODEM) to transfer files to Amiga from Linux computer because it is much easier
+than configuring TCP/IP.
+
+How To Set Up ZMODEM Linux to Amiga
+-----------------------------------
+
+On your Amiga computer, install NComm 3.06, the public keyfile, ReqTools.library, and xprzmodem.library:
+
+http://aminet.net/comm/term/ncomm306.lha
+http://aminet.net/comm/term/NComm306PubKey.lha
+http://aminet.net/comm/term/XPRZ351.lha
+http://aminet.net/util/libs/ReqToolsUsr.lha
+
+On Linux install sz:
+
+   sudo apt-get install lrzsz
+
+On Linux start login on serial TTY, eg:
+
+   sudo agetty -h -L 19200 ttyS0 vt102
+
+On Amiga start NComm and configure serial. You should get login prompt from Linux computer so log in.
+Now you can transfer any file from Linux to Amiga like:
+
+   sz myfile.lha
+
+How To Use Python Aminet Download Tool
+--------------------------------------
+
+Above is pretty easy way to get files onto Amiga but when it comes to Aminet we have to first download
+the file to Linux PC and then use sz to transfer it to Amiga. That's where PyADT comes in.
+
+Start it up and you get a command line interface similar to a CLI FTP client. You can 'cd' and 'ls'.
+When you 'get' a file, sz will start automatically, causing NComm to download the file.
+
+PyADT does not retrieve directory listings from the server every time. Instead it downloads the Gzip
+index of all files on Aminet when you first run it. That makes it extremely fast. You can update the 
+local cached index with 'update' command.
+
+TODO
+----
+
+Implement searching/sorting/wildcards.
+Implement displaying readmes.

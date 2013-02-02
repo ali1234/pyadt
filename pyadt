@@ -1,0 +1,173 @@
+#!/usr/bin/env python
+
+# * Copyright 2013 Alistair Buxton <a.j.buxton@gmail.com>
+# *
+# * License: This program is free software; you can redistribute it and/or
+# * modify it under the terms of the GNU General Public License as published
+# * by the Free Software Foundation; either version 3 of the License, or (at
+# * your option) any later version. This program is distributed in the hope
+# * that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+# * warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# * GNU General Public License for more details.
+
+import cmd
+import os
+import pipes
+import posixpath
+import urllib2
+from datetime import datetime
+from gzip import GzipFile
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+from collections import defaultdict
+
+class FileInfo(object):
+    maxname = 1
+    tmp = [1,1,1]
+    def __init__(self, data):
+        tmp = data.strip().split('@')
+        try:
+            self.date = datetime.fromtimestamp(int(tmp[0], 10))
+            self.path = tmp[1].split('/')
+            self.name = tmp[2]
+            if len(self.name) > FileInfo.maxname:
+               FileInfo.maxname = len(self.name)
+            self.size = int(tmp[3], 10)
+            self.a = tmp[4]
+            self.b = tmp[5]
+            self.c = tmp[6]
+            for n in range(4, 7):
+                if len(tmp[n]) > FileInfo.tmp[n-4]:
+                    FileInfo.tmp[n-4] = len(tmp[n])
+            self.desc = tmp[7]
+        except ValueError:
+            logging.warn('Bad File Info: ' + data)
+
+    def __str__(self):
+        return "%32s%9d %10s %s" % (self.name, self.size, self.date.date().isoformat(), self.desc )
+
+class ADT(cmd.Cmd):
+    intro = 'Welcome to Python Aminet Download Tool.\n'
+
+    cached = '/home/al/.pyadt/'
+    mirror = 'ftp://uk.aminet.net/pub/aminet/'
+
+    def __init__(self):
+        if not os.path.exists(ADT.cached):
+            logging.debug('Make directory: ' + ADT.cached)
+            os.makedirs(ADT.cached)
+        self.db = defaultdict(lambda: defaultdict(lambda: defaultdict(FileInfo)))
+        self.load_db()
+        cmd.Cmd.__init__(self)
+        self.cwd = ''
+        self.update_prompt()
+
+    def update_prompt(self):
+        self.prompt = 'Aminet:' + self.cwd + '> '
+
+    def get_file(self, filename, force=False):
+        if force or not os.path.exists(ADT.cached+filename):
+            if not os.path.exists(ADT.cached+os.path.dirname(filename)):
+                logging.debug('Make directory: ' + ADT.cached+os.path.dirname(filename))
+                os.makedirs(ADT.cached+os.path.dirname(filename))
+            logging.debug('Download file: ' + ADT.mirror+filename)
+            response = urllib2.urlopen(ADT.mirror+filename)
+            file(ADT.cached+filename, 'wb').write(response.read())
+
+    def load_db(self, force=False):
+        self.get_file('info/adt/ADT_LOCAL.gz', force)
+        local = GzipFile(ADT.cached+'info/adt/ADT_LOCAL.gz')
+        next(local)
+
+        for line in local:
+            f = FileInfo(line)
+            self.db[f.path[0]][f.path[1]][f.name] = f
+
+        print ('Database loaded.')
+
+    def path_exists(self, path):
+        path = path.strip('/').split('/')
+        n = len(path)
+        if n == 1:
+            return path[0] == '' or path[0] in self.db
+        elif n == 2:
+            return path[0] in self.db and path[1] in self.db[path[0]]
+
+        else:
+             return False
+
+    def file_exists(self, path):
+        path = path.strip('/').split('/')
+        n = len(path)
+        if n == 3:
+            return path[0] in self.db and path[1] in self.db[path[0]] and path[2] in self.db[path[0]][path[1]]
+        else:
+             return False
+
+
+    # Commands
+
+    def do_exit(self, s):
+        'Exit Python Aminet Download Tool.'
+        return True
+
+    do_quit = do_exit
+    do_EOF = do_exit
+
+    def emptyline(self):
+        pass
+
+    def do_update(self, arg):
+        'Update Aminet index database.'
+        self.load_db(force=True)
+
+    def do_ls(self, arg):
+        'List file/directories in current working directory.'
+        path = self.cwd.strip('/').split('/')
+        n = len(path)
+        if n == 1:
+          if path[0] == '':
+            for k in self.db.keys():
+                print k
+          else:
+            for k in self.db[path[0]].keys():
+                print k
+        elif n == 2:
+            for k,v in self.db[path[0]][path[1]].items():
+                print v
+
+    def do_cd(self, arg):
+        'Change working directory.'
+        if arg == '':
+            return
+        if arg[0] == '/':
+            newcwd = posixpath.normpath(arg)
+        else:
+            newcwd = posixpath.normpath('/'+self.cwd+'/'+arg)
+        newcwd = newcwd.strip('/')
+        print newcwd
+        if self.path_exists(newcwd):
+            self.cwd = newcwd
+            self.update_prompt()
+        else:
+            print ('No such directory.')
+
+        
+    def do_get(self, arg):
+        'Download named file.'
+        if arg == '':
+            return
+        if arg[0] == '/':
+            filepath = posixpath.normpath(arg)
+        else:
+            filepath = posixpath.normpath('/'+self.cwd+'/'+arg)
+        filepath = filepath.strip('/')
+        if self.file_exists(filepath):
+            self.get_file(filepath)
+            os.system('sz '+pipes.quote(ADT.cached+filepath))
+        else:
+            print ('No such file.')
+
+if __name__=='__main__':
+    ADT().cmdloop()
