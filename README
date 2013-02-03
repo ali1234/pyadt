@@ -22,9 +22,12 @@ On Linux install sz:
 
    sudo apt-get install lrzsz
 
-On Linux start login on serial TTY, eg:
+On Linux start login on serial TTY. Copy ttyS0.conf to /etc/init and then:
 
-   sudo agetty -h -L 19200 ttyS0 vt102
+   sudo service ttyS0 start
+
+ttyS0.conf is set for baud rate of 57600 which is the maximum I could use reliably 
+on A4000/030. You might need to adjust it lower on slower machines.
 
 On Amiga start NComm and configure serial. You should get login prompt from Linux 
 computer so log in. Now you can transfer any file from Linux to Amiga like:
@@ -42,12 +45,17 @@ Start it up and you get a command line interface similar to a CLI FTP client.
 You can 'cd' and 'ls'. When you 'get' a file, sz will start automatically, 
 causing NComm to download the file.
 
+PyADT detects if you are running it on a serial terminal. If you run it in a 
+normal shell window it will not attemp to launch sz. It will just download the 
+file to the cache instead.
+
 PyADT does not retrieve directory listings from the server every time. Instead it 
-downloads the Gzip index of all files on Aminet when you first run it. That makes 
-it extremely fast. You can update the local cached index with 'update' command.
+downloads the Gzip index of all files on Aminet when you first run it. This whole
+index is loaded into memory at startup whch takes about 2 seconds. That makes 
+it extremely fast. You can force to redownload the index with 'update' command.
 
 TODO
 ----
 
-Implement searching/sorting/wildcards.
+Implement searching/sorting.
 Implement displaying readmes.
