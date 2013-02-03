@@ -14,6 +14,7 @@ import cmd
 import os
 import pipes
 import posixpath
+import fnmatch
 import urllib2
 from datetime import datetime
 from gzip import GzipFile
@@ -23,29 +24,44 @@ logging.basicConfig(level=logging.DEBUG)
 from collections import defaultdict
 
 class FileInfo(object):
-    maxname = 1
-    tmp = [1,1,1]
     def __init__(self, data):
         tmp = data.strip().split('@')
-        try:
-            self.date = datetime.fromtimestamp(int(tmp[0], 10))
-            self.path = tmp[1].split('/')
-            self.name = tmp[2]
-            if len(self.name) > FileInfo.maxname:
-               FileInfo.maxname = len(self.name)
-            self.size = int(tmp[3], 10)
-            self.a = tmp[4]
-            self.b = tmp[5]
-            self.c = tmp[6]
-            for n in range(4, 7):
-                if len(tmp[n]) > FileInfo.tmp[n-4]:
-                    FileInfo.tmp[n-4] = len(tmp[n])
-            self.desc = tmp[7]
-        except ValueError:
-            logging.warn('Bad File Info: ' + data)
 
-    def __str__(self):
-        return "%32s%9d %10s %s" % (self.name, self.size, self.date.date().isoformat(), self.desc )
+        self.date = datetime.fromtimestamp(int(tmp[0], 10))
+        self.path = tmp[1].split('/')
+        self.name = tmp[2]
+        self.size = int(tmp[3], 10)
+        self.a = tmp[4]
+        self.b = tmp[5]
+        self.c = tmp[6]
+        self.desc = tmp[7]
+
+  
+    def pretty_size(self):
+        if   self.size > 99000000:
+            tmp = "%.0fM" % (self.size / 1000000.0)
+        elif self.size > 999999:
+            tmp = "%.1fM" % (self.size / 1000000.0)
+        elif self.size > 99000:
+            tmp = "%.0fK" % (self.size / 1000.0)
+        elif self.size > 999:
+            tmp = "%.1fK" % (self.size / 1000.0)
+        else:
+            tmp = "%dB" % (self.size)
+        return tmp.rjust(5, ' ')
+
+    def pretty_name(self, pad):
+        return self.name.ljust(min(pad,len(self.name)+1), ' ').ljust(pad, '.')
+
+    def info(self, pad=16):
+        return ' '.join([
+            self.pretty_name(pad),
+            self.pretty_size(),
+            self.date.date().isoformat(),
+            self.desc
+        ])
+
+
 
 class ADT(cmd.Cmd):
     intro = 'Welcome to Python Aminet Download Tool.\n'
@@ -62,6 +78,12 @@ class ADT(cmd.Cmd):
         cmd.Cmd.__init__(self)
         self.cwd = ''
         self.update_prompt()
+        ttyname = os.ttyname(0)
+        if 'ttyUSB' in ttyname or 'ttyS' in ttyname:
+            self.sz = True
+            print 'Detected serial terminal. Will transfer downloaded files using zmodem.'
+        else:
+            self.sz = False
 
     def update_prompt(self):
         self.prompt = 'Aminet:' + self.cwd + '> '
@@ -81,8 +103,11 @@ class ADT(cmd.Cmd):
         next(local)
 
         for line in local:
-            f = FileInfo(line)
-            self.db[f.path[0]][f.path[1]][f.name] = f
+            try:
+                f = FileInfo(line)
+                self.db[f.path[0]][f.path[1]][f.name] = f
+            except ValueError:
+                logging.warn('Bad File Info: ' + line)
 
         print ('Database loaded.')
 
@@ -105,6 +130,16 @@ class ADT(cmd.Cmd):
         else:
              return False
 
+    def cd(self, old, new):
+        if new == '':
+            return old
+        elif new[0] == '/':
+            tmp = posixpath.normpath(new)
+        else:
+            tmp = posixpath.normpath('/'+old+'/'+new)
+        tmp = tmp.strip('/')
+        logging.debug('Old: ' + old + ' New: ' + new + ' Result: ' + tmp)
+        return tmp
 
     # Commands
 
@@ -124,29 +159,88 @@ class ADT(cmd.Cmd):
 
     def do_ls(self, arg):
         'List file/directories in current working directory.'
-        path = self.cwd.strip('/').split('/')
+        path = [p.lower() for p in self.cd(self.cwd, arg).split('/')]
         n = len(path)
         if n == 1:
-          if path[0] == '':
-            for k in self.db.keys():
-                print k
-          else:
-            for k in self.db[path[0]].keys():
-                print k
+            if path[0] == '':
+                for k in sorted(self.db.keys()):
+                    relpath = posixpath.relpath('/'+k, '/'+self.cwd)
+                    if relpath == '.':
+                        relpath = '../'+k
+                    elif relpath == '..':
+                        relpath = '../../'+k
+                    print relpath
+            else:
+                for k in sorted(self.db.keys()):
+                    if fnmatch.fnmatch(k, path[0]):
+                        for kk in self.db[k].keys():
+                            relpath = posixpath.relpath('/'+k+'/'+kk, '/'+self.cwd)
+                            if relpath == '.':
+                                relpath = '../'+kk
+                            print relpath
         elif n == 2:
-            for k,v in self.db[path[0]][path[1]].items():
-                print v
+            maxpad = 1
+            for k in self.db.keys():
+                if fnmatch.fnmatch(k, path[0]):
+                    for kk in self.db[k].keys():
+                        if fnmatch.fnmatch(kk, path[1]):
+                            relpath = posixpath.relpath('/'+k+'/'+kk, '/'+self.cwd)
+                            if relpath == '.':
+                                relpath = ''
+                            else:
+                                relpath += '/'
+                            for v in self.db[k][kk].values():
+                                if len(v.name)+len(relpath) > maxpad:
+                                    maxpad = len(v.name)+len(relpath)
+
+            for k in sorted(self.db.keys()):
+                if fnmatch.fnmatch(k, path[0]):
+                    for kk in sorted(self.db[k].keys()):
+                        if fnmatch.fnmatch(kk, path[1]):
+                            relpath = posixpath.relpath('/'+k+'/'+kk, '/'+self.cwd)
+                            if relpath == '.':
+                                relpath = ''
+                            else:
+                                relpath += '/'
+                            for v in sorted(self.db[k][kk].values(), key=lambda f: f.name):
+                                print relpath + v.info(maxpad-len(relpath))
+
+        elif n == 3:
+            maxpad = 1
+            for k in self.db.keys():
+                if fnmatch.fnmatch(k, path[0]):
+                    for kk in self.db[k].keys():
+                        if fnmatch.fnmatch(kk, path[1]):
+                            relpath = posixpath.relpath('/'+k+'/'+kk, '/'+self.cwd)
+                            if relpath == '.':
+                                relpath = ''
+                            else:
+                                relpath += '/'
+                            for v in self.db[k][kk].values():
+                                if fnmatch.fnmatch(v.name.lower(), path[2]):
+                                    if len(v.name)+len(relpath) > maxpad:
+                                        maxpad = len(v.name)+len(relpath)
+
+            for k in sorted(self.db.keys()):
+                if fnmatch.fnmatch(k, path[0]):
+                    for kk in sorted(self.db[k].keys()):
+                        if fnmatch.fnmatch(kk, path[1]):
+                            relpath = posixpath.relpath('/'+k+'/'+kk, '/'+self.cwd)
+                            if relpath == '.':
+                                relpath = ''
+                            else:
+                                relpath += '/'
+                            for v in sorted(self.db[k][kk].values(), key=lambda f: f.name):
+                                if fnmatch.fnmatch(v.name.lower(), path[2]):
+                                    print relpath + v.info(maxpad-len(relpath))
+
+
 
     def do_cd(self, arg):
         'Change working directory.'
         if arg == '':
             return
-        if arg[0] == '/':
-            newcwd = posixpath.normpath(arg)
-        else:
-            newcwd = posixpath.normpath('/'+self.cwd+'/'+arg)
-        newcwd = newcwd.strip('/')
-        print newcwd
+        newcwd = self.cd(self.cwd, arg)
         if self.path_exists(newcwd):
             self.cwd = newcwd
             self.update_prompt()
@@ -158,14 +252,11 @@ class ADT(cmd.Cmd):
         'Download named file.'
         if arg == '':
             return
-        if arg[0] == '/':
-            filepath = posixpath.normpath(arg)
-        else:
-            filepath = posixpath.normpath('/'+self.cwd+'/'+arg)
-        filepath = filepath.strip('/')
+        filepath = self.cd(self.cwd, arg)
         if self.file_exists(filepath):
             self.get_file(filepath)
-            os.system('sz '+pipes.quote(ADT.cached+filepath))
+            if self.sz:
+                os.system('sz '+pipes.quote(ADT.cached+filepath))
         else:
             print ('No such file.')
 
