@@ -26,6 +26,8 @@ On Linux start login on serial TTY. Copy ttyS0.conf to /etc/init and then:
 
    sudo service ttyS0 start
 
+The service will start automatically after a reboot.
+
 ttyS0.conf is set for baud rate of 57600 which is the maximum I could use reliably 
 on A4000/030. You might need to adjust it lower on slower machines.
 
